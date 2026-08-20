@@ -53,6 +53,8 @@ Además necesitas un archivo `credenciales.json` en la raíz del proyecto con la
 
 También edita `CALENDAR_ID` en [server.js](server.js) con el correo del calendario que quieres usar, y comparte ese calendario con el correo de la cuenta de servicio (permiso "Hacer cambios en los eventos").
 
+El horario laboral (`ZONA_NEGOCIO`, `HORA_APERTURA`, `HORA_CIERRE` en `server.js`) está configurado para Orlando, Florida (`America/New_York`, lunes a viernes de 9:00 a.m. a 6:00 p.m.). El asistente pregunta desde qué país o ciudad llama el cliente para explicarle la equivalencia horaria, y el servidor rechaza agendar citas fuera de ese horario aunque el modelo se equivoque.
+
 ## Uso
 
 ```bash

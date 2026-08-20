@@ -5,12 +5,28 @@ const Anthropic = require('@anthropic-ai/sdk');
 const { google } = require('googleapis');
 const nodemailer = require('nodemailer');
 const cors = require('cors');
+const { DateTime } = require('luxon');
 
 const app = express();
 const port = process.env.PORT || 8080;
 
 // 1. CONFIGURACIÓN DEL CALENDARIO
-const CALENDAR_ID = 'cecsdevelop@gmail.com'; 
+const CALENDAR_ID = 'cecsdevelop@gmail.com';
+
+// Zona horaria real del negocio (Orlando, Florida). Se usa un nombre de zona IANA
+// en vez de un offset fijo (-05:00/-04:00) para que el horario de verano (DST)
+// se calcule solo, en vez de arrastrar un desfase manual todo el año.
+const ZONA_NEGOCIO = 'America/New_York';
+const HORA_APERTURA = 9;  // 9:00 a.m., hora del Este
+const HORA_CIERRE = 18;   // 6:00 p.m., hora del Este (última cita posible empieza a las 17:00)
+
+function fechaEnZonaNegocio(fecha, hora) {
+  return DateTime.fromISO(`${fecha}T${hora}`, { zone: ZONA_NEGOCIO });
+}
+
+function estaEnHorarioLaboral(dt) {
+  return dt.isValid && dt.weekday >= 1 && dt.weekday <= 5 && dt.hour >= HORA_APERTURA && dt.hour < HORA_CIERRE;
+}
 
 const auth = new google.auth.GoogleAuth({
   keyFile: './credenciales.json',
@@ -71,7 +87,12 @@ async function notificarNuevaCita({ nombre, fecha, hora, telefono, correo }) {
 // 2. CONFIGURACIÓN DE CLAUDE Y HERRAMIENTAS
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const PROMPT_SISTEMA = `Eres Alex, el asistente virtual telefónico de Intelindev, una agencia de Desarrollo de Software y SEO.
+// Función (no constante) porque "hoy" tiene que recalcularse en cada llamada;
+// un string fijo se habría quedado desactualizado desde el día siguiente.
+function obtenerPromptSistema() {
+  const hoy = DateTime.now().setZone(ZONA_NEGOCIO).setLocale('es').toFormat("d 'de' MMMM 'de' yyyy");
+
+  return `Eres Alex, el asistente virtual telefónico de Intelindev, una agencia de Desarrollo de Software y SEO.
 Tu trabajo es atender a los clientes con un tono profesional, tecnológico, muy amable y CONVERSACIONAL. Sé breve en tus respuestas.
 
 REGLAS DE FORMATO Y VOZ (¡MUY IMPORTANTE!):
@@ -85,7 +106,7 @@ INICIO DE LA LLAMADA Y TRATO AL CLIENTE:
 
 INFORMACIÓN DE LA EMPRESA:
 - Servicios principales: Desarrollo de Software a la medida, SEO, Outsourcing, Desarrollo de Sitios Web y E-commerce, y Diseño Digital.
-- Ubicación: Orlando, Florida, Estados Unidos.
+- Ubicación: Orlando, Florida, Estados Unidos (hora del Este, America/New_York).
 - Contacto: Correo a info@intelindev.com o al teléfono +1 407 555 0199.
 - Precios: No damos precios exactos por teléfono porque cada proyecto es a la medida.
 
@@ -93,16 +114,25 @@ TU OBJETIVO:
 Explica nuestros servicios brevemente y ofrece agendar una cita o videollamada con nuestro equipo de Project Management.
 
 REGLAS DE AGENDAMIENTO:
-- Hoy es 19 de Agosto de 2026.
+- Hoy es ${hoy}, hora del Este (America/New_York).
+- Nuestro horario laboral es de lunes a viernes, de 9:00 a.m. a 6:00 p.m., hora del Este. Nunca ofrezcas ni confirmes una cita fuera de ese rango.
 - SIEMPRE usa la herramienta 'revisar_disponibilidad' primero cuando el cliente acepte agendar una reunión.
 - Ya que tienes el nombre del cliente desde el principio, confirma la hora deseada y la fecha.
 - Antes de llamar a 'agendar_cita' pide primero el correo electrónico del cliente para poder confirmarle la cita. Si el cliente no tiene correo a la mano o prefiere no darlo, pide en su lugar el número de teléfono de contacto y léelo en voz alta dígito por dígito para verificar que lo capturaste bien.
 - Necesitas obligatoriamente al menos uno de los dos datos (correo o teléfono) antes de agendar. Si el cliente se niega a dar ambos, explica que necesitas al menos uno para poder confirmarle la cita y contactarlo en caso de imprevistos.
 - Nunca llames a 'agendar_cita' sin tener al menos el correo o el teléfono del cliente.
 
+ZONA HORARIA DEL CLIENTE:
+- Nosotros operamos en hora del Este de Estados Unidos (Orlando, Florida). Los horarios que te da 'revisar_disponibilidad' y los que agenda 'agendar_cita' están siempre en esa zona horaria.
+- Cuando el cliente quiera agendar una reunión y no sepas desde qué país o ciudad llama, pregúntaselo de forma natural, por ejemplo: "¿desde qué país o ciudad nos contactas?".
+- Con esa información, calcula la diferencia horaria con nuestra hora del Este y explícasela con claridad antes de confirmar cualquier cita. Por ejemplo: "tus 5 de la tarde serían nuestras 9 de la noche, y lamentablemente no estamos disponibles a esa hora; sin embargo, tenemos disponible nuestras 6 de la tarde, que serían tus 2 de la tarde, ¿te funcionaría?".
+- Si el horario que menciona el cliente, convertido a nuestra hora, cae fuera de nuestro horario laboral (9:00 a.m.–6:00 p.m., lunes a viernes, hora del Este), explícaselo con la conversión y ofrécele una alternativa dentro de nuestro horario, también convertida a su hora local.
+- Si el cliente no quiere decir desde dónde llama, continúa asumiendo que la hora que menciona ya está en hora del Este.
+
 CIERRE DE LLAMADA:
 - Cuando el cliente confirme que no necesita nada más, despídete de forma breve y cálida usando su nombre, y en ese mismo mensaje llama a la herramienta 'finalizar_llamada'.
 - No vuelvas a ofrecer ayuda, ni repitas preguntas, ni uses 'revisar_disponibilidad' u otra herramienta después de que el cliente ya haya confirmado que no necesita nada más.`;
+}
 
 // Detección determinística de frases de cierre. No confiamos solo en que el modelo
 // elija bien la herramienta 'finalizar_llamada': si el último mensaje del cliente
@@ -153,7 +183,7 @@ async function generarDespedida(mensajes) {
   const msgDespedida = await anthropic.messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 100,
-    system: PROMPT_SISTEMA + "\n\nNOTA: El cliente acaba de confirmar que no necesita nada más. No tienes herramientas disponibles en este mensaje. Responde ÚNICAMENTE con una despedida breve, cálida y profesional usando su nombre si lo sabes, en lenguaje natural. No ofrezcas más ayuda, no hagas preguntas, y no menciones nombres de herramientas ni código (por ejemplo, nunca escribas la palabra 'finalizar_llamada').",
+    system: obtenerPromptSistema() + "\n\nNOTA: El cliente acaba de confirmar que no necesita nada más. No tienes herramientas disponibles en este mensaje. Responde ÚNICAMENTE con una despedida breve, cálida y profesional usando su nombre si lo sabes, en lenguaje natural. No ofrezcas más ayuda, no hagas preguntas, y no menciones nombres de herramientas ni código (por ejemplo, nunca escribas la palabra 'finalizar_llamada').",
     messages: mensajes
   });
   const bloqueTexto = msgDespedida.content.find(c => c.type === 'text');
@@ -163,24 +193,30 @@ async function generarDespedida(mensajes) {
 async function ejecutarHerramienta(toolCall) {
   if (toolCall.name === 'revisar_disponibilidad') {
     try {
+      const inicioDia = DateTime.fromISO(`${toolCall.input.fecha}T00:00:00`, { zone: ZONA_NEGOCIO });
+      if (!inicioDia.isValid) {
+        return "La fecha indicada no es válida.";
+      }
+      const finDia = inicioDia.endOf('day');
       const response = await calendar.events.list({
         calendarId: CALENDAR_ID,
-        timeMin: `${toolCall.input.fecha}T00:00:00-06:00`,
-        timeMax: `${toolCall.input.fecha}T23:59:59-06:00`,
+        timeMin: inicioDia.toISO(),
+        timeMax: finDia.toISO(),
         singleEvents: true,
         orderBy: 'startTime',
       });
       const eventos = response.data.items;
+      const avisoHorario = "Nuestro horario laboral es de lunes a viernes, de 9:00 a.m. a 6:00 p.m., hora del Este (America/New_York).";
       if (eventos.length === 0) {
-        return "Todo el día está libre.";
+        return `Todo el día está libre. ${avisoHorario}`;
       }
-      const formatoHora = { hour: '2-digit', minute: '2-digit', timeZone: 'America/Mexico_City' };
+      const formatoHora = { hour: '2-digit', minute: '2-digit', timeZone: ZONA_NEGOCIO };
       const ocupados = eventos.map(e => {
         const inicio = new Date(e.start.dateTime || e.start.date).toLocaleTimeString('es-MX', formatoHora);
         const fin = new Date(e.end.dateTime || e.end.date).toLocaleTimeString('es-MX', formatoHora);
         return `de ${inicio} a ${fin}`;
       }).join(', y ');
-      return `Horarios ocupados: ${ocupados}. Cualquier otro horario dentro del horario laboral está libre. Antes de confirmar con el cliente, verifica que la hora que pide no caiga dentro de ninguno de esos rangos ocupados (inicio inclusive, fin exclusive).`;
+      return `Horarios ocupados: ${ocupados}. Cualquier otro horario dentro del horario laboral está libre. Antes de confirmar con el cliente, verifica que la hora que pide no caiga dentro de ninguno de esos rangos ocupados (inicio inclusive, fin exclusive). ${avisoHorario}`;
     } catch (e) {
       console.error("❌ Error leyendo calendario:", e.message);
       return "Hubo un error al leer el calendario. Pide disculpas al usuario.";
@@ -196,9 +232,17 @@ async function ejecutarHerramienta(toolCall) {
       return "Falta un dato de contacto válido (correo o teléfono). Pide al usuario al menos uno de los dos antes de agendar.";
     }
 
+    const inicioSolicitado = fechaEnZonaNegocio(fecha, hora);
+    if (!inicioSolicitado.isValid) {
+      return "La fecha u hora indicada no es válida.";
+    }
+    if (!estaEnHorarioLaboral(inicioSolicitado)) {
+      return "Ese horario está fuera de nuestro horario laboral (lunes a viernes, de 9:00 a.m. a 6:00 p.m., hora del Este). No lo agendes. Si sabes desde qué país o ciudad llama el cliente, explícale la equivalencia horaria y ofrécele una alternativa dentro de nuestro horario, convertida a su hora local. Si no lo sabes, pregúntale desde dónde llama para poder ayudarle a encontrar un horario que le funcione.";
+    }
+
     try {
-      const start = new Date(`${fecha}T${hora}:00-06:00`);
-      const end = new Date(start.getTime() + 60 * 60 * 1000);
+      const start = inicioSolicitado.toJSDate();
+      const end = inicioSolicitado.plus({ hours: 1 }).toJSDate();
 
       const checkConflicto = await calendar.events.list({
         calendarId: CALENDAR_ID,
@@ -255,7 +299,7 @@ async function ejecutarConversacion(mensajesActuales, onHerramienta) {
   const msg = await anthropic.messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 300,
-    system: PROMPT_SISTEMA,
+    system: obtenerPromptSistema(),
     messages: mensajesActuales,
     tools: tools
   });
