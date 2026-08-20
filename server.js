@@ -350,8 +350,20 @@ server.on('upgrade', (request, socket, head) => {
   }
 });
 
+const SALUDO_INICIAL = "Hola, soy Alex, tu asistente de inteligencia artificial para Intelindev. ¿En qué puedo ayudarte hoy?";
+
 wss.on('connection', (ws, req) => {
   console.log(`🟢 Retell AI conectado.`);
+
+  // Begin message: el agente debe hablar primero. Retell trata response_id: 0
+  // como el primer mensaje del agente, no como respuesta a un turno del usuario.
+  ws.send(JSON.stringify({
+    response_type: 'response',
+    response_id: 0,
+    content: SALUDO_INICIAL,
+    content_complete: true,
+    end_call: false
+  }));
 
   ws.on('message', async (message) => {
     try {
