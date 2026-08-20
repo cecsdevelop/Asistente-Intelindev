@@ -1,0 +1,71 @@
+<!-- Botón de IA Intelindev -->
+<div class="intelindev-ai-wrapper" style="text-align: center; margin: 20px 0;">
+    <button id="aiContactButton" style="padding: 15px 35px; font-size: 18px; font-weight: bold; color: white; background: #2563eb; border: none; border-radius: 50px; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4); display: inline-flex; align-items: center; justify-content: center; gap: 10px;">
+        <span id="aiButtonIcon">📞</span> 
+        <span id="aiButtonText">Llamar a Asistente Virtual</span>
+    </button>
+</div>
+
+<script type="module">
+    // Importamos el SDK directamente desde un CDN optimizado
+    import { RetellWebClient } from 'https://esm.sh/retell-client-js-sdk';
+
+    const retellClient = new RetellWebClient();
+    const button = document.getElementById('aiContactButton');
+    const buttonText = document.getElementById('aiButtonText');
+    const buttonIcon = document.getElementById('aiButtonIcon');
+    let isCalling = false;
+
+    button.addEventListener('click', async () => {
+        if (isCalling) {
+            retellClient.stopCall();
+            return; 
+        }
+
+        // Estado visual: Conectando
+        buttonText.innerText = 'Conectando...';
+        buttonIcon.innerText = '⏳';
+        button.style.background = '#eab308'; // Amarillo de espera
+        button.style.boxShadow = '0 4px 15px rgba(234, 179, 8, 0.4)';
+
+        try {
+            // Petición al servidor de producción en Render
+            const response = await fetch('https://asistente-intelindev.onrender.com/create-web-call', { method: 'POST' });
+            const data = await response.json();
+
+            // Inicia la conexión de voz
+            await retellClient.startCall({
+                accessToken: data.access_token,
+            });
+            
+            // Estado visual: En Llamada
+            buttonText.innerText = 'Colgar Llamada';
+            buttonIcon.innerText = '🛑';
+            button.style.background = '#ef4444'; // Rojo para colgar
+            button.style.boxShadow = '0 4px 15px rgba(239, 68, 68, 0.4)';
+            isCalling = true;
+
+        } catch (error) {
+            console.error("Error al conectar con IA de Intelindev:", error);
+            buttonText.innerText = 'Error al conectar';
+            buttonIcon.innerText = '❌';
+            
+            // Regresa al estado original después de un error
+            setTimeout(() => { 
+                buttonText.innerText = 'Llamar a Asistente Virtual'; 
+                buttonIcon.innerText = '📞';
+                button.style.background = '#2563eb';
+                button.style.boxShadow = '0 4px 15px rgba(37, 99, 235, 0.4)';
+            }, 3000);
+        }
+    });
+
+    // Estado visual: Cuando se termina la llamada
+    retellClient.on('call_ended', () => {
+        buttonText.innerText = 'Llamar a Asistente Virtual';
+        buttonIcon.innerText = '📞';
+        button.style.background = '#2563eb';
+        button.style.boxShadow = '0 4px 15px rgba(37, 99, 235, 0.4)';
+        isCalling = false;
+    });
+</script>
