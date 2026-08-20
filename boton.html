@@ -1,71 +1,332 @@
-<!-- Botón de IA Intelindev -->
-<div class="intelindev-ai-wrapper" style="text-align: center; margin: 20px 0;">
-    <button id="aiContactButton" style="padding: 15px 35px; font-size: 18px; font-weight: bold; color: white; background: #2563eb; border: none; border-radius: 50px; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4); display: inline-flex; align-items: center; justify-content: center; gap: 10px;">
-        <span id="aiButtonIcon">📞</span> 
-        <span id="aiButtonText">Llamar a Asistente Virtual</span>
-    </button>
-</div>
+<!--
+  Widget de Asistente IA - Intelindev.
+  Pega este bloque completo en cualquier página web (antes de </body>) y listo.
+  No requiere nada más: crea su propio botón flotante y su propio panel,
+  aislados del resto de la página con Shadow DOM (así el CSS del sitio no lo
+  rompe, y el widget tampoco afecta los estilos del sitio).
+-->
+<script>
+(function () {
+  // Cambia esto solo si tu backend vive en otra URL.
+  var SERVER_URL = 'https://asistente-intelindev.onrender.com';
 
-<script type="module">
-    // Importamos el SDK directamente desde un CDN optimizado
-    import { RetellWebClient } from 'https://esm.sh/retell-client-js-sdk';
+  var host = document.createElement('div');
+  host.id = 'intelindev-ai-widget-host';
+  document.body.appendChild(host);
+  var shadow = host.attachShadow({ mode: 'open' });
 
-    const retellClient = new RetellWebClient();
-    const button = document.getElementById('aiContactButton');
-    const buttonText = document.getElementById('aiButtonText');
-    const buttonIcon = document.getElementById('aiButtonIcon');
-    let isCalling = false;
+  shadow.innerHTML = `
+    <style>
+      :host { all: initial; }
+      * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
 
-    button.addEventListener('click', async () => {
-        if (isCalling) {
-            retellClient.stopCall();
-            return; 
-        }
+      #fab {
+        position: fixed; bottom: 24px; right: 24px; z-index: 999999;
+        width: 60px; height: 60px; border-radius: 50%; border: none; cursor: pointer;
+        background: #2563eb; color: white; font-size: 26px;
+        display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 4px 15px rgba(37, 99, 235, 0.5);
+        transition: transform 0.2s ease, background 0.2s ease;
+      }
+      #fab:hover { transform: scale(1.06); background: #1d4ed8; }
 
-        // Estado visual: Conectando
-        buttonText.innerText = 'Conectando...';
-        buttonIcon.innerText = '⏳';
-        button.style.background = '#eab308'; // Amarillo de espera
-        button.style.boxShadow = '0 4px 15px rgba(234, 179, 8, 0.4)';
+      #panel {
+        position: fixed; bottom: 96px; right: 24px; z-index: 999999;
+        width: 380px; max-width: calc(100vw - 32px);
+        height: 600px; max-height: calc(100vh - 140px);
+        background: #1e293b; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        display: none; flex-direction: column; overflow: hidden;
+      }
+      #panel.open { display: flex; }
 
-        try {
-            // Petición al servidor de producción en Render
-            const response = await fetch('https://asistente-intelindev.onrender.com/create-web-call', { method: 'POST' });
-            const data = await response.json();
+      .chat-header {
+        padding: 16px 18px; background: #1e293b; border-bottom: 1px solid #334155;
+        display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+      }
+      .chat-header .dot { width: 10px; height: 10px; border-radius: 50%; background: #22c55e; flex-shrink: 0; transition: background 0.2s ease; }
+      .chat-header .dot.en-llamada { background: #ef4444; animation: pulso 1.5s infinite; }
+      @keyframes pulso { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+      .chat-header .info { flex: 1; min-width: 0; }
+      .chat-header h2 { margin: 0; color: #f8fafc; font-size: 15px; }
+      .chat-header p { margin: 0; color: #94a3b8; font-size: 12px; }
+      .chat-header .close-btn {
+        background: none; border: none; color: #94a3b8; font-size: 18px; cursor: pointer;
+        width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+      }
+      .chat-header .close-btn:hover { background: #334155; color: #f8fafc; }
 
-            // Inicia la conexión de voz
-            await retellClient.startCall({
-                accessToken: data.access_token,
-            });
-            
-            // Estado visual: En Llamada
-            buttonText.innerText = 'Colgar Llamada';
-            buttonIcon.innerText = '🛑';
-            button.style.background = '#ef4444'; // Rojo para colgar
-            button.style.boxShadow = '0 4px 15px rgba(239, 68, 68, 0.4)';
-            isCalling = true;
+      .chat-messages {
+        flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px;
+      }
+      .msg { max-width: 82%; padding: 10px 14px; border-radius: 14px; font-size: 14px; line-height: 1.4; white-space: pre-wrap; color: #e2e8f0; }
+      .msg.assistant { align-self: flex-start; background: #334155; color: #e2e8f0; border-bottom-left-radius: 4px; }
+      .msg.user { align-self: flex-end; background: #3b82f6; color: white; border-bottom-right-radius: 4px; }
+      .msg.system { align-self: center; background: transparent; color: #64748b; font-size: 12px; font-style: italic; text-align: center; }
+      .msg.subtitulo { border: 1px dashed #475569; }
 
-        } catch (error) {
-            console.error("Error al conectar con IA de Intelindev:", error);
-            buttonText.innerText = 'Error al conectar';
-            buttonIcon.innerText = '❌';
-            
-            // Regresa al estado original después de un error
-            setTimeout(() => { 
-                buttonText.innerText = 'Llamar a Asistente Virtual'; 
-                buttonIcon.innerText = '📞';
-                button.style.background = '#2563eb';
-                button.style.boxShadow = '0 4px 15px rgba(37, 99, 235, 0.4)';
-            }, 3000);
-        }
-    });
+      .typing { align-self: flex-start; color: #64748b; font-size: 13px; padding: 0 4px; }
 
-    // Estado visual: Cuando se termina la llamada
-    retellClient.on('call_ended', () => {
-        buttonText.innerText = 'Llamar a Asistente Virtual';
-        buttonIcon.innerText = '📞';
-        button.style.background = '#2563eb';
-        button.style.boxShadow = '0 4px 15px rgba(37, 99, 235, 0.4)';
-        isCalling = false;
-    });
+      .chat-input {
+        display: flex; gap: 8px; padding: 14px; border-top: 1px solid #334155; background: #1e293b; flex-shrink: 0;
+      }
+      .chat-input input {
+        flex: 1; min-width: 0; padding: 12px 14px; border-radius: 24px; border: none;
+        background: #0f172a; color: #f8fafc; font-size: 14px; outline: none;
+      }
+      .chat-input input::placeholder { color: #64748b; }
+      .chat-input button {
+        width: 44px; height: 44px; border-radius: 50%; border: none; cursor: pointer;
+        color: white; font-size: 18px; display: flex; align-items: center; justify-content: center;
+        transition: background 0.2s ease; flex-shrink: 0;
+      }
+      #sendButton { background: #3b82f6; }
+      #sendButton:hover { background: #2563eb; }
+      #callButton { background: #22c55e; }
+      #callButton:hover { background: #16a34a; }
+      #callButton.en-llamada { background: #ef4444; }
+      #callButton.en-llamada:hover { background: #dc2626; }
+      button:disabled { background: #475569 !important; cursor: not-allowed; }
+      .chat-input input:disabled { opacity: 0.6; }
+
+      @media (max-width: 480px) {
+        #panel { right: 16px; bottom: 88px; }
+        #fab { right: 16px; bottom: 16px; }
+      }
+    </style>
+
+    <button id="fab" aria-label="Hablar con el asistente de Intelindev">💬</button>
+
+    <div id="panel">
+      <div class="chat-header">
+        <div class="dot" id="statusDot"></div>
+        <div class="info">
+          <h2>Alex - Asistente Intelindev</h2>
+          <p id="statusText">Habla o escribe, como prefieras</p>
+        </div>
+        <button class="close-btn" id="closeBtn" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="chat-messages" id="chatMessages"></div>
+      <div class="chat-input">
+        <button id="callButton" aria-label="Llamar">📞</button>
+        <input type="text" id="chatInput" placeholder="Escribe tu mensaje..." autocomplete="off" />
+        <button id="sendButton" aria-label="Enviar">➤</button>
+      </div>
+    </div>
+  `;
+
+  var fab = shadow.querySelector('#fab');
+  var panel = shadow.querySelector('#panel');
+  var closeBtn = shadow.querySelector('#closeBtn');
+  var messagesEl = shadow.querySelector('#chatMessages');
+  var inputEl = shadow.querySelector('#chatInput');
+  var sendButton = shadow.querySelector('#sendButton');
+  var callButton = shadow.querySelector('#callButton');
+  var statusDot = shadow.querySelector('#statusDot');
+  var statusText = shadow.querySelector('#statusText');
+
+  function abrirPanel() {
+    panel.classList.add('open');
+    fab.textContent = '✕';
+    inputEl.focus();
+  }
+  function cerrarPanel() {
+    panel.classList.remove('open');
+    fab.textContent = '💬';
+  }
+  fab.addEventListener('click', function () {
+    if (panel.classList.contains('open')) cerrarPanel(); else abrirPanel();
+  });
+  closeBtn.addEventListener('click', cerrarPanel);
+
+  // hilo = fuente de verdad de TODO lo que se muestra (texto, voz ya finalizada
+  // y avisos de sistema). Mientras hay una llamada activa, los subtítulos en vivo
+  // se muestran aparte (turnosVoz) y solo se fusionan a hilo cuando la llamada
+  // termina, porque el transcript que manda Retell puede reescribirse mientras
+  // el STT se afina. renderTodo() redibuja siempre desde estos dos arrays.
+  var hilo = [];
+  var turnosVoz = [];
+  var enLlamada = false;
+  var enviando = false;
+  var conversacionCerrada = false;
+  var resolverCierrePendiente = null;
+  var retellClient = null;
+
+  function esperarCierreLlamada() {
+    if (!enLlamada) return Promise.resolve();
+    return new Promise(function (resolve) { resolverCierrePendiente = resolve; });
+  }
+
+  function crearBurbuja(role, texto, extraClass) {
+    var div = document.createElement('div');
+    div.className = 'msg ' + role + (extraClass ? ' ' + extraClass : '');
+    div.textContent = texto;
+    return div;
+  }
+
+  function agregarMensaje(role, texto) {
+    hilo.push({ role: role, content: texto });
+    renderTodo();
+  }
+
+  function renderTodo() {
+    messagesEl.innerHTML = '';
+    hilo.forEach(function (m) { messagesEl.appendChild(crearBurbuja(m.role, m.content)); });
+    turnosVoz.forEach(function (m) { messagesEl.appendChild(crearBurbuja(m.role, m.content, 'subtitulo')); });
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function mostrarEscribiendo(mostrar) {
+    var el = shadow.querySelector('#typingIndicator');
+    if (mostrar) {
+      if (el) return;
+      el = document.createElement('div');
+      el.id = 'typingIndicator';
+      el.className = 'typing';
+      el.textContent = 'Alex está escribiendo...';
+      messagesEl.appendChild(el);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    } else if (el) {
+      el.remove();
+    }
+  }
+
+  function marcarConversacionCerrada() {
+    conversacionCerrada = true;
+    inputEl.disabled = true;
+    sendButton.disabled = true;
+    callButton.disabled = true;
+    agregarMensaje('system', 'La conversación ha finalizado.');
+  }
+
+  // --- TEXTO ---
+
+  async function enviarMensaje() {
+    var texto = inputEl.value.trim();
+    if (!texto || enviando || conversacionCerrada) return;
+
+    if (enLlamada && retellClient) {
+      retellClient.stopCall();
+      await esperarCierreLlamada();
+    }
+
+    agregarMensaje('user', texto);
+    inputEl.value = '';
+
+    enviando = true;
+    sendButton.disabled = true;
+    mostrarEscribiendo(true);
+
+    try {
+      var mensajesParaApi = hilo.filter(function (m) { return m.role === 'user' || m.role === 'assistant'; });
+      var response = await fetch(SERVER_URL + '/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: mensajesParaApi })
+      });
+      var data = await response.json();
+
+      mostrarEscribiendo(false);
+
+      if (!response.ok) {
+        agregarMensaje('system', 'Hubo un problema de conexión. Intenta de nuevo.');
+        return;
+      }
+
+      agregarMensaje('assistant', data.respuesta);
+
+      if (data.cerrar) marcarConversacionCerrada();
+    } catch (error) {
+      console.error('Error en el chat del widget Intelindev:', error);
+      mostrarEscribiendo(false);
+      agregarMensaje('system', 'No se pudo conectar con el servidor.');
+    } finally {
+      enviando = false;
+      if (!conversacionCerrada) sendButton.disabled = false;
+      inputEl.focus();
+    }
+  }
+
+  sendButton.addEventListener('click', enviarMensaje);
+  inputEl.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') enviarMensaje();
+  });
+  inputEl.addEventListener('input', function () {
+    if (enLlamada && inputEl.value.length > 0 && retellClient) {
+      retellClient.stopCall();
+    }
+  });
+
+  // Mensaje inicial, igual al saludo que usa el agente de voz.
+  agregarMensaje('assistant', 'Hola, soy Alex, tu asistente de inteligencia artificial para Intelindev. ¿En qué puedo ayudarte hoy?');
+
+  // --- VOZ (SDK cargado bajo demanda, así la página no paga ese peso si nadie usa el widget) ---
+
+  callButton.addEventListener('click', async function () {
+    if (conversacionCerrada) return;
+    if (enLlamada && retellClient) {
+      retellClient.stopCall();
+      return;
+    }
+
+    callButton.innerText = '⏳';
+    callButton.disabled = true;
+
+    try {
+      if (!retellClient) {
+        var mod = await import('https://esm.sh/retell-client-js-sdk');
+        retellClient = new mod.RetellWebClient();
+
+        // Los subtítulos se re-dibujan completos en cada update porque el STT puede
+        // corregir el texto de un turno mientras se afina, no solo añadir turnos nuevos.
+        retellClient.on('update', function (update) {
+          if (!Array.isArray(update.transcript)) return;
+          turnosVoz = update.transcript
+            .filter(function (t) { return t.content; })
+            .map(function (t) { return { role: t.role === 'agent' ? 'assistant' : 'user', content: t.content }; });
+          renderTodo();
+        });
+
+        retellClient.on('call_ended', function () {
+          hilo = hilo.concat(turnosVoz);
+          turnosVoz = [];
+          enLlamada = false;
+          callButton.innerText = '📞';
+          callButton.classList.remove('en-llamada');
+          callButton.disabled = false;
+          statusDot.classList.remove('en-llamada');
+          statusText.textContent = 'Habla o escribe, como prefieras';
+          renderTodo();
+
+          if (!conversacionCerrada) {
+            agregarMensaje('system', 'Llamada finalizada. Puedes seguir escribiendo.');
+            inputEl.focus();
+          }
+
+          if (resolverCierrePendiente) {
+            resolverCierrePendiente();
+            resolverCierrePendiente = null;
+          }
+        });
+      }
+
+      var response = await fetch(SERVER_URL + '/create-web-call', { method: 'POST' });
+      var data = await response.json();
+      await retellClient.startCall({ accessToken: data.access_token });
+
+      enLlamada = true;
+      turnosVoz = [];
+      callButton.innerText = '🛑';
+      callButton.classList.add('en-llamada');
+      callButton.disabled = false;
+      statusDot.classList.add('en-llamada');
+      statusText.textContent = 'En llamada — subtítulos en vivo';
+      agregarMensaje('system', 'Llamada iniciada. Si no escuchas bien o prefieres no hablar, escribe tu respuesta y la llamada se cerrará sola para continuar por texto.');
+    } catch (error) {
+      console.error('Error al conectar la llamada del widget Intelindev:', error);
+      agregarMensaje('system', 'No se pudo iniciar la llamada.');
+      callButton.innerText = '📞';
+      callButton.disabled = false;
+    }
+  });
+})();
 </script>
