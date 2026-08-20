@@ -147,6 +147,145 @@ const tools = [
   }
 ];
 
+// 3. LÓGICA DE LA CONVERSACIÓN (compartida entre voz y chat de texto)
+
+async function generarDespedida(mensajes) {
+  const msgDespedida = await anthropic.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 100,
+    system: PROMPT_SISTEMA + "\n\nNOTA: El cliente acaba de confirmar que no necesita nada más. No tienes herramientas disponibles en este mensaje. Responde ÚNICAMENTE con una despedida breve, cálida y profesional usando su nombre si lo sabes, en lenguaje natural. No ofrezcas más ayuda, no hagas preguntas, y no menciones nombres de herramientas ni código (por ejemplo, nunca escribas la palabra 'finalizar_llamada').",
+    messages: mensajes
+  });
+  const bloqueTexto = msgDespedida.content.find(c => c.type === 'text');
+  return (bloqueTexto && bloqueTexto.text.trim()) || "Ha sido un placer atenderte. Que tengas un excelente día, ¡hasta luego!";
+}
+
+async function ejecutarHerramienta(toolCall) {
+  if (toolCall.name === 'revisar_disponibilidad') {
+    try {
+      const response = await calendar.events.list({
+        calendarId: CALENDAR_ID,
+        timeMin: `${toolCall.input.fecha}T00:00:00-06:00`,
+        timeMax: `${toolCall.input.fecha}T23:59:59-06:00`,
+        singleEvents: true,
+        orderBy: 'startTime',
+      });
+      const eventos = response.data.items;
+      if (eventos.length === 0) {
+        return "Todo el día está libre.";
+      }
+      const formatoHora = { hour: '2-digit', minute: '2-digit', timeZone: 'America/Mexico_City' };
+      const ocupados = eventos.map(e => {
+        const inicio = new Date(e.start.dateTime || e.start.date).toLocaleTimeString('es-MX', formatoHora);
+        const fin = new Date(e.end.dateTime || e.end.date).toLocaleTimeString('es-MX', formatoHora);
+        return `de ${inicio} a ${fin}`;
+      }).join(', y ');
+      return `Horarios ocupados: ${ocupados}. Cualquier otro horario dentro del horario laboral está libre. Antes de confirmar con el cliente, verifica que la hora que pide no caiga dentro de ninguno de esos rangos ocupados (inicio inclusive, fin exclusive).`;
+    } catch (e) {
+      console.error("❌ Error leyendo calendario:", e.message);
+      return "Hubo un error al leer el calendario. Pide disculpas al usuario.";
+    }
+  }
+
+  if (toolCall.name === 'agendar_cita') {
+    // Validación de servidor: nunca confiar solo en el 'required' del schema
+    const { fecha, hora, nombre, telefono, correo } = toolCall.input;
+    const telefonoValido = telefono && telefono.trim().length >= 7;
+    const correoValido = correo && correo.includes('@');
+    if (!telefonoValido && !correoValido) {
+      return "Falta un dato de contacto válido (correo o teléfono). Pide al usuario al menos uno de los dos antes de agendar.";
+    }
+
+    try {
+      const start = new Date(`${fecha}T${hora}:00-06:00`);
+      const end = new Date(start.getTime() + 60 * 60 * 1000);
+
+      const checkConflicto = await calendar.events.list({
+        calendarId: CALENDAR_ID,
+        timeMin: start.toISOString(),
+        timeMax: end.toISOString(),
+        singleEvents: true,
+      });
+
+      const esNuestraPropiaCita = checkConflicto.data.items.length > 0 &&
+        checkConflicto.data.items.every(e => {
+          const desc = e.description || '';
+          return (telefonoValido && desc.includes(`Teléfono: ${telefono}`)) ||
+                 (correoValido && desc.includes(`Correo: ${correo}`));
+        });
+
+      if (checkConflicto.data.items.length > 0 && !esNuestraPropiaCita) {
+        console.log("⚠️ Conflicto real: el horario ya está ocupado por otra cita.");
+        return "Ese horario ya no está disponible, alguien más lo ocupó. Dile al usuario que ese horario ya no está libre y pídele otra hora, luego usa revisar_disponibilidad de nuevo antes de reintentar.";
+      }
+      if (esNuestraPropiaCita) {
+        console.log("ℹ️ Cita duplicada del mismo cliente evitada, ya existía.");
+        return "Esa cita ya estaba agendada previamente con estos mismos datos. Dile al usuario que su cita está confirmada.";
+      }
+
+      const descripcionPartes = [];
+      if (correoValido) descripcionPartes.push(`Correo: ${correo}`);
+      if (telefonoValido) descripcionPartes.push(`Teléfono: ${telefono}`);
+
+      await calendar.events.insert({
+        calendarId: CALENDAR_ID,
+        resource: {
+          summary: `Cita: ${nombre}`,
+          description: descripcionPartes.join('\n'),
+          start: { dateTime: start.toISOString() },
+          end: { dateTime: end.toISOString() }
+        }
+      });
+      console.log("✅ Cita guardada en Google Calendar.");
+      // No se espera (await) para no meter latencia extra a la respuesta.
+      notificarNuevaCita({ nombre, fecha, hora, telefono: telefonoValido ? telefono : null, correo: correoValido ? correo : null });
+      return "Cita agendada exitosamente.";
+    } catch (e) {
+      console.error("❌ Error agendando:", e.message);
+      return "No se pudo agendar la cita. Pide disculpas al usuario.";
+    }
+  }
+
+  return "";
+}
+
+// Corre el ciclo de Claude + herramientas hasta obtener una respuesta final en texto.
+// onHerramienta(nombre) es opcional y se usa solo en voz, para enviar la frase de espera.
+async function ejecutarConversacion(mensajesActuales, onHerramienta) {
+  const msg = await anthropic.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 300,
+    system: PROMPT_SISTEMA,
+    messages: mensajesActuales,
+    tools: tools
+  });
+
+  if (msg.stop_reason === 'tool_use') {
+    const toolCall = msg.content.find(c => c.type === 'tool_use');
+    console.log(`🛠️ Claude usando herramienta: ${toolCall.name} con datos:`, toolCall.input);
+
+    if (toolCall.name === 'finalizar_llamada') {
+      const bloqueTexto = msg.content.find(c => c.type === 'text');
+      const despedida = (bloqueTexto && bloqueTexto.text.trim()) || "Ha sido un placer atenderte. Que tengas un excelente día, ¡hasta luego!";
+      return { texto: despedida, cerrar: true };
+    }
+
+    if (onHerramienta) onHerramienta(toolCall.name);
+
+    const resultadoHerramienta = await ejecutarHerramienta(toolCall);
+
+    mensajesActuales.push({ role: "assistant", content: msg.content });
+    mensajesActuales.push({
+      role: "user",
+      content: [{ type: "tool_result", tool_use_id: toolCall.id, content: resultadoHerramienta }]
+    });
+
+    return ejecutarConversacion(mensajesActuales, onHerramienta);
+  }
+
+  return { texto: msg.content[0].text, cerrar: false };
+}
+
 app.use(cors()); // Permite conexiones desde páginas web
 app.use(express.json()); // Permite leer datos en JSON
 
@@ -173,6 +312,33 @@ app.post('/create-web-call', async (req, res) => {
   }
 });
 
+// Chat de texto (accesibilidad): mismo cerebro que la llamada de voz, sin telefonía.
+// El cliente manda el historial completo { messages: [{role, content}, ...] } y recibe
+// la respuesta en texto. content son strings simples, igual que el transcript de Retell.
+app.post('/chat', async (req, res) => {
+  try {
+    const messages = Array.isArray(req.body.messages) ? req.body.messages : [];
+    const ultimoTurno = messages[messages.length - 1];
+
+    if (!ultimoTurno || ultimoTurno.role !== 'user' || !ultimoTurno.content) {
+      return res.status(400).json({ error: 'Se requiere al menos un mensaje del usuario.' });
+    }
+
+    console.log(`💬 Chat - último mensaje: "${ultimoTurno.content}" | ¿cierre detectado?: ${pareceCierre(ultimoTurno.content)}`);
+
+    if (pareceCierre(ultimoTurno.content)) {
+      const despedida = await generarDespedida(messages);
+      return res.json({ respuesta: despedida, cerrar: true });
+    }
+
+    const { texto, cerrar } = await ejecutarConversacion([...messages]);
+    res.json({ respuesta: texto, cerrar });
+  } catch (e) {
+    console.error("❌ Error en /chat:", e.message);
+    res.status(500).json({ error: 'No se pudo procesar el mensaje.' });
+  }
+});
+
 const server = app.listen(port, () => console.log(`Servidor iniciado en el puerto ${port}`));
 const wss = new WebSocket.Server({ noServer: true });
 
@@ -184,21 +350,19 @@ server.on('upgrade', (request, socket, head) => {
   }
 });
 
-// 3. LÓGICA DE LA CONVERSACIÓN
 wss.on('connection', (ws, req) => {
   console.log(`🟢 Retell AI conectado.`);
 
   ws.on('message', async (message) => {
     try {
       const data = JSON.parse(message);
-      
+
       if (data.interaction_type === 'response_required') {
         const responseId = data.response_id;
         let messages = data.transcript.map(turn => ({
            role: turn.role === 'agent' ? 'assistant' : 'user',
            content: turn.content
         })).filter(turn => turn.content !== '');
-        let avisoEsperaEnviado = false;
 
         // Atajo determinístico: si el cliente acaba de decir algo como "no, nada más",
         // no le damos ninguna herramienta a Claude en este turno. Así se elimina por completo
@@ -210,14 +374,7 @@ wss.on('connection', (ws, req) => {
         }
         if (ultimoTurno && ultimoTurno.role === 'user' && pareceCierre(ultimoTurno.content)) {
           console.log('👋 Frase de cierre detectada, forzando despedida sin herramientas.');
-          const msgDespedida = await anthropic.messages.create({
-            model: "claude-sonnet-4-6",
-            max_tokens: 100,
-            system: PROMPT_SISTEMA + "\n\nNOTA: El cliente acaba de confirmar que no necesita nada más. Responde ÚNICAMENTE con una despedida breve, cálida y profesional usando su nombre si lo sabes. No ofrezcas más ayuda ni hagas preguntas.",
-            messages: messages
-          });
-          const bloqueTexto = msgDespedida.content.find(c => c.type === 'text');
-          const despedida = (bloqueTexto && bloqueTexto.text.trim()) || "Ha sido un placer atenderte. Que tengas un excelente día, ¡hasta luego!";
+          const despedida = await generarDespedida(messages);
           ws.send(JSON.stringify({
             response_type: 'response',
             response_id: responseId,
@@ -228,168 +385,33 @@ wss.on('connection', (ws, req) => {
           return;
         }
 
-        async function procesarClaude(mensajesActuales) {
-          const msg = await anthropic.messages.create({
-            model: "claude-sonnet-4-6",
-            max_tokens: 300,
-            system: PROMPT_SISTEMA,
-            messages: mensajesActuales,
-            tools: tools
-          });
-
-          if (msg.stop_reason === 'tool_use') {
-            const toolCall = msg.content.find(c => c.type === 'tool_use');
-            console.log(`🛠️ Claude usando herramienta: ${toolCall.name} con datos:`, toolCall.input);
-
-            if (toolCall.name === 'finalizar_llamada') {
-              const bloqueTexto = msg.content.find(c => c.type === 'text');
-              const despedida = (bloqueTexto && bloqueTexto.text.trim()) || "Ha sido un placer atenderte. Que tengas un excelente día, ¡hasta luego!";
-              ws.send(JSON.stringify({
-                response_type: 'response',
-                response_id: responseId,
-                content: despedida,
-                content_complete: true,
-                end_call: true
-              }));
-              return null; // Ya se envió la respuesta final; no hay que reenviar nada más.
-            }
-
-            // --- FRASE DE ESPERA ---
-            // Solo se envía una vez por turno, aunque Claude encadene varias herramientas
-            // (ej. revisar disponibilidad y luego agendar), para no repetir "espere un momento".
-            if (!avisoEsperaEnviado) {
-              let fraseEspera = "Claro, por favor permítame un momento mientras reviso la disponibilidad en el calendario.";
-              if (toolCall.name === 'agendar_cita') {
-                fraseEspera = "Excelente, deme un segundo mientras confirmo y guardo su cita en el sistema.";
-              }
-
-              ws.send(JSON.stringify({
-                response_type: 'response',
-                response_id: responseId,
-                content: fraseEspera,
-                content_complete: false, // Le dice a Retell que aún falta la respuesta real
-                end_call: false
-              }));
-              avisoEsperaEnviado = true;
-            }
-            // ------------------------------
-            
-            let resultadoHerramienta = "";
-
-            if (toolCall.name === 'revisar_disponibilidad') {
-              try {
-                const response = await calendar.events.list({
-                  calendarId: CALENDAR_ID,
-                  timeMin: `${toolCall.input.fecha}T00:00:00-06:00`,
-                  timeMax: `${toolCall.input.fecha}T23:59:59-06:00`,
-                  singleEvents: true,
-                  orderBy: 'startTime',
-                });
-                const eventos = response.data.items;
-                if (eventos.length === 0) {
-                  resultadoHerramienta = "Todo el día está libre.";
-                } else {
-                  const formatoHora = { hour: '2-digit', minute: '2-digit', timeZone: 'America/Mexico_City' };
-                  const ocupados = eventos.map(e => {
-                    const inicio = new Date(e.start.dateTime || e.start.date).toLocaleTimeString('es-MX', formatoHora);
-                    const fin = new Date(e.end.dateTime || e.end.date).toLocaleTimeString('es-MX', formatoHora);
-                    return `de ${inicio} a ${fin}`;
-                  }).join(', y ');
-                  resultadoHerramienta = `Horarios ocupados: ${ocupados}. Cualquier otro horario dentro del horario laboral está libre. Antes de confirmar con el cliente, verifica que la hora que pide no caiga dentro de ninguno de esos rangos ocupados (inicio inclusive, fin exclusive).`;
-                }
-              } catch (e) {
-                console.error("❌ Error leyendo calendario:", e.message);
-                resultadoHerramienta = "Hubo un error al leer el calendario. Pide disculpas al usuario.";
-              }
-              
-            } else if (toolCall.name === 'agendar_cita') {
-              // Validación de servidor: nunca confiar solo en el 'required' del schema
-              const { fecha, hora, nombre, telefono, correo } = toolCall.input;
-              const telefonoValido = telefono && telefono.trim().length >= 7;
-              const correoValido = correo && correo.includes('@');
-              if (!telefonoValido && !correoValido) {
-                resultadoHerramienta = "Falta un dato de contacto válido (correo o teléfono). Pide al usuario al menos uno de los dos antes de agendar.";
-                mensajesActuales.push({ role: "assistant", content: msg.content });
-                mensajesActuales.push({
-                  role: "user",
-                  content: [{ type: "tool_result", tool_use_id: toolCall.id, content: resultadoHerramienta }]
-                });
-                return procesarClaude(mensajesActuales);
-              }
-
-              try {
-                const start = new Date(`${fecha}T${hora}:00-06:00`);
-                const end = new Date(start.getTime() + 60 * 60 * 1000);
-
-                const checkConflicto = await calendar.events.list({
-                  calendarId: CALENDAR_ID,
-                  timeMin: start.toISOString(),
-                  timeMax: end.toISOString(),
-                  singleEvents: true,
-                });
-
-                const esNuestraPropiaCita = checkConflicto.data.items.length > 0 &&
-                  checkConflicto.data.items.every(e => {
-                    const desc = e.description || '';
-                    return (telefonoValido && desc.includes(`Teléfono: ${telefono}`)) ||
-                           (correoValido && desc.includes(`Correo: ${correo}`));
-                  });
-
-                if (checkConflicto.data.items.length > 0 && !esNuestraPropiaCita) {
-                  console.log("⚠️ Conflicto real: el horario ya está ocupado por otra cita.");
-                  resultadoHerramienta = "Ese horario ya no está disponible, alguien más lo ocupó. Dile al usuario que ese horario ya no está libre y pídele otra hora, luego usa revisar_disponibilidad de nuevo antes de reintentar.";
-                } else if (esNuestraPropiaCita) {
-                  console.log("ℹ️ Cita duplicada del mismo cliente evitada, ya existía.");
-                  resultadoHerramienta = "Esa cita ya estaba agendada previamente con estos mismos datos. Dile al usuario que su cita está confirmada.";
-                } else {
-                  const descripcionPartes = [];
-                  if (correoValido) descripcionPartes.push(`Correo: ${correo}`);
-                  if (telefonoValido) descripcionPartes.push(`Teléfono: ${telefono}`);
-
-                  await calendar.events.insert({
-                    calendarId: CALENDAR_ID,
-                    resource: {
-                      summary: `Cita: ${nombre}`,
-                      description: descripcionPartes.join('\n'),
-                      start: { dateTime: start.toISOString() },
-                      end: { dateTime: end.toISOString() }
-                    }
-                  });
-                  resultadoHerramienta = "Cita agendada exitosamente.";
-                  console.log("✅ Cita guardada en Google Calendar.");
-                  // No se espera (await) para no meter latencia extra a la respuesta de voz.
-                  notificarNuevaCita({ nombre, fecha, hora, telefono: telefonoValido ? telefono : null, correo: correoValido ? correo : null });
-                }
-              } catch (e) {
-                console.error("❌ Error agendando:", e.message);
-                resultadoHerramienta = "No se pudo agendar la cita. Pide disculpas al usuario.";
-              }
-            }
-
-            mensajesActuales.push({ role: "assistant", content: msg.content });
-            mensajesActuales.push({
-              role: "user",
-              content: [{ type: "tool_result", tool_use_id: toolCall.id, content: resultadoHerramienta }]
-            });
-
-            return procesarClaude(mensajesActuales);
+        // --- FRASE DE ESPERA ---
+        // Solo se envía una vez por turno, aunque Claude encadene varias herramientas
+        // (ej. revisar disponibilidad y luego agendar), para no repetir "espere un momento".
+        let avisoEsperaEnviado = false;
+        const { texto, cerrar } = await ejecutarConversacion(messages, (nombreHerramienta) => {
+          if (avisoEsperaEnviado) return;
+          let fraseEspera = "Claro, por favor permítame un momento mientras reviso la disponibilidad en el calendario.";
+          if (nombreHerramienta === 'agendar_cita') {
+            fraseEspera = "Excelente, deme un segundo mientras confirmo y guardo su cita en el sistema.";
           }
-
-          return msg.content[0].text;
-        }
-
-        const respuestaFinal = await procesarClaude(messages);
-
-        // Si respuestaFinal es null, 'finalizar_llamada' ya envió la respuesta y colgó.
-        if (respuestaFinal !== null) {
           ws.send(JSON.stringify({
             response_type: 'response',
             response_id: responseId,
-            content: respuestaFinal,
-            content_complete: true,
+            content: fraseEspera,
+            content_complete: false, // Le dice a Retell que aún falta la respuesta real
             end_call: false
           }));
-        }
+          avisoEsperaEnviado = true;
+        });
+
+        ws.send(JSON.stringify({
+          response_type: 'response',
+          response_id: responseId,
+          content: texto,
+          content_complete: true,
+          end_call: cerrar
+        }));
       }
     } catch (e) {
       console.error('Error general:', e);
