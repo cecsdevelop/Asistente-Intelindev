@@ -75,7 +75,9 @@ wss://tu-subdominio.ngrok-free.dev/llm-websocket
 
 ### Widget de llamada web
 
-[index.html](index.html) es un botón standalone que permite iniciar una llamada de voz directo desde el navegador (usa el SDK `retell-client-js-sdk` y el endpoint `POST /create-web-call` del servidor para generar el token de la llamada). Ábrelo directamente en el navegador mientras el servidor corre en local.
+[dev/index.html](dev/index.html) es un botón standalone que permite iniciar una llamada de voz directo desde el navegador (usa el SDK `retell-client-js-sdk` y el endpoint `POST /create-web-call` del servidor para generar el token de la llamada). Ábrelo directamente en el navegador mientras el servidor corre en local.
+
+La carpeta `dev/` (`index.html`, `chat.html`, `widget.html`) contiene páginas de prueba local que apuntan a `http://localhost:8080` — no se suben al repositorio (ver `.gitignore`). El widget de producción, embebido en intelindev.com, es [boton.html](boton.html), que sí apunta al servidor desplegado en Render.
 
 ## Notas de seguridad
 
