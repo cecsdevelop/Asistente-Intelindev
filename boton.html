@@ -49,7 +49,8 @@
       .chat-header .info { flex: 1; min-width: 0; }
       .chat-header .title-row { display: flex; align-items: center; gap: 6px; }
       .chat-header h2 { margin: 0; color: #f8fafc; font-size: 15px; }
-      .chat-header .lang-flags { font-size: 12px; letter-spacing: -2px; opacity: 0.85; }
+      .chat-header .lang-flags { display: flex; align-items: center; gap: 4px; opacity: 0.85; }
+      .chat-header .lang-flags img { width: 16px; height: 16px; border-radius: 2px; display: block; }
       .chat-header p { margin: 0; color: #94a3b8; font-size: 12px; }
       .chat-header .close-btn {
         background: none; border: none; color: #94a3b8; font-size: 18px; cursor: pointer;
@@ -104,7 +105,10 @@
         <div class="info">
           <div class="title-row">
             <h2>Alex - Asistente Intelindev</h2>
-            <span class="lang-flags" title="Disponible en español e inglés / Available in Spanish and English"><img src="images/spa.png"><img src="images/usa.png"></span>
+            <!-- Imágenes embebidas (no emoji: las banderas de país no se ven en Windows,
+                 salen como texto "ES"/"US"). Son copias en base64 de images/spa.png y
+                 images/usa.png del repo; si cambiás esos archivos, regenerá este base64. -->
+            <span class="lang-flags" title="Disponible en español e inglés / Available in Spanish and English"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAMAAAC6V+0/AAAAAXNSR0IB2cksfwAAAAlwSFlzAAAHiQAAB4kB+XNYvQAAARFQTFRFAAAAxgsexgsexgsexgsexgsexgsexgsexgsexgsexgsexgsexgsexgsexgsexgse96cE/sIA/8MA9qUF/sAB/8QA+MAD6bgJ5rYK+cAD/8IA77oGwHARs1wOs2IWwnMP87wE/8MA560C5a0CxIUHj1cMl1oOxokJ5KwC6a8C/8MA3bQZ1KcaoSQUoSUUvqOqwKil1rQv2bEYzIMtw3sujzoffzsppYCQxaKryo9HyYcp0Ikxy4wupkoPeEUzglNFuHBAzYo9y4cv/8IA3rQy2LMwq2ELql4MsFMTt1wP2q07164vvaMrwqYn1pgGuI86u4I5240Jv6Mpv6Qp9qcE/8MA9qYEyRQdyBAdyBAdxgse1XYjigAAAFt0Uk5TAANjtuT7swRW3/8FnP6QVwTg/wRl//////+3////////5f///////////P///////////////////////////////7X/////////////////////BOAEVv7/tc7DfoYAAAC3SURBVHicddGxCsIwEAbg+ys1ggoO6uAgdHFw0NFV8BUEfUV9CunoqKOjoy5CHUJbzkubtLHQHzLkgyR3F5AJTIiDjLnYylJGyjCzLrAP5OTS4VQLqtAzUWgN6oW+iQYfjKr7XDjAGOXjmaeYpdQtKvpWGCJKhijzdjjA8jW1+HQ4EZxbfNQYJQuL9/r47ra2eHW4kpI2FuO6pD0ujeK30s6h0RLzqWUgpBTnf9Y6ZDITOZ697/gB3E83md+rZ/YAAAAASUVORK5CYII=" alt="Español"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAMAAAC6V+0/AAAAAXNSR0IB2cksfwAAAAlwSFlzAAAOxAAADsQBlSsOGwAAAVZQTFRFAAAALG6+BVa2G2S7A1S1AVO08PDw8PDw8PDw8PDw8PDw8PDwzdnnGmO7HWW7obzcVovKAVK08O7u8O3u7+nq7MjPClm2jK7XlbTZAFK0Clm3oLvcV4vK2yBC2x9B2Qgt2hE1DVu3AlO1CVi2JWq9A1S1IGe82AAn2AAn2AQq2hU4JWq9BFW1a5jPq8PfFmC6r8XgYJHM3TFQ3TFQ4VdwLXC/Km6/XY/LharVC1m3iazWT4bI8PDw8PDwPnvDAlS1B1a2Jmu+AVO0I2m94OXsWo7LBVW1v9DkG2S7J2y+xNPld6HS4E9p30dieqLSNXXBUojJdJ7RCli2eKHSRYDF2AIo2AEo55ak5oyc55ak2QUr2yJE2AEo2yFC6J6r67/H67/H6J2r8PDw8PDw8PDw7+vr7dDV7c/V7+rr3CtL2Qkv2AMq2AIo3CtK3CJD2AIp2AIp3CVGg6j38QAAAHJ0Uk5TAARlt+X8++SzYwMEV+D//////99WBAWe/v///////p0FBJ7+//////6SBFf+/////////lcE3////////99l//////+2//////////+35P///////+X8tP+zZQTgBFf+/1ec/pCQ/v+QBFjg/wQEt7UEzVLanwAAAN9JREFUeJxjZAABRjj4BuYCMTdUACL7GiwoBhH6ywLV8wAoqAikv/IwfvnPBzPpGiODNkjZdy7GB4oMUNEzjKaMj+UYHyowMt5TZoCKnmW0Y7ylznhDk/HvTZggw1lGF0bGT/wgE45ZwwQZGf0YT5kznrBkZDzKBxPUY2QVgbHhgvqMbGYM6OAUI7sphuBpxnBGDEFGxqizGILGjNGMp9HETIFBE8eIasB/pvmMDNzhjDeRxNQZl38FquKOQlL7n2nxV3AgZzLCRf//Z54MCXkGhrw3os8YGf5LvxLvB3EBOxYvPReQtOkAAAAASUVORK5CYII=" alt="English"></span>
           </div>
           <p id="statusText">Habla o escribe, como prefieras</p>
         </div>
