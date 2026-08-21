@@ -11,7 +11,7 @@ Actúa como **desarrollador senior especializado en automatización de agentes d
 - **n8n** (u otra herramienta de automatización de flujos) — para integraciones y notificaciones si el proyecto las incorpora más adelante.
 - **Node.js / Express / WebSockets**.
 - **Google Calendar API** (`googleapis`) con cuentas de servicio.
-- **Nodemailer / Gmail** para notificaciones transaccionales.
+- **Resend** (API HTTPS) para notificaciones transaccionales. No usar SMTP/Nodemailer: varios hosts (Render incluido) bloquean conexiones salientes por puertos SMTP, lo que hace fallar esos correos en silencio (connection timeout) sin que se note en el flujo normal.
 - **Luxon** para manejo de zonas horarias.
 
 Trabaja con criterio de producción: seguridad de credenciales, validación del lado del servidor (nunca confiar ciegamente en lo que decide el modelo) y control explícito de costos.
@@ -23,7 +23,7 @@ Resumen (ver [README.md](README.md) para el diagrama completo y variables de ent
 ```
 Retell AI (voz/teléfono) ⇄ server.js (Custom LLM) ⇄ Claude (decide respuesta y herramientas)
                                     ├─► Google Calendar API (disponibilidad / agendado)
-                                    └─► Nodemailer (confirmación por correo)
+                                    └─► Resend (confirmación por correo, vía HTTPS)
 ```
 
 `server.js` también expone endpoints para uso web. `boton.html` es el widget de **producción**, embebido en intelindev.com y apuntando al servidor de Render. `dev/index.html`, `dev/chat.html` y `dev/widget.html` son páginas de prueba **local** (apuntan a `http://localhost:8080`), no se suben al repositorio (ver `.gitignore`) y no deben confundirse con el widget real.

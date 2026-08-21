@@ -3,7 +3,7 @@ const express = require('express');
 const WebSocket = require('ws');
 const Anthropic = require('@anthropic-ai/sdk');
 const { google } = require('googleapis');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const cors = require('cors');
 const { DateTime } = require('luxon');
 
@@ -44,25 +44,27 @@ auth.getClient().then(() => {
 // Notificación por correo al dueño del calendario (la API de Calendar no la envía
 // por defecto y, al usar una cuenta de servicio sobre un Gmail personal, tampoco
 // se puede invitar attendees para que Google mande la invitación automáticamente).
-const mailer = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_APP_PASSWORD
-  }
-});
+// Se manda por la API HTTPS de Resend en vez de SMTP: varios hosts (Render incluido)
+// bloquean o cortan las conexiones salientes por los puertos SMTP, lo que hacía que
+// estos correos fallaran siempre con "Connection timeout" sin que nadie lo notara.
+const resend = new Resend(process.env.RESEND_API_KEY);
+// Antes de verificar un dominio propio en Resend, solo se puede enviar desde este
+// remitente de pruebas — funciona, pero para producción real conviene verificar un
+// dominio (ej. intelindev.com) y apuntar RESEND_FROM_EMAIL a algo como alex@intelindev.com.
+const REMITENTE = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
 
 async function notificarNuevaCita({ nombre, fecha, hora, telefono, correo }) {
   const contacto = [telefono ? `Teléfono: ${telefono}` : null, correo ? `Correo: ${correo}` : null]
     .filter(Boolean).join(' | ');
 
   try {
-    await mailer.sendMail({
-      from: `Alex (Asistente Intelindev) <${process.env.GMAIL_USER}>`,
-      to: process.env.GMAIL_USER,
+    const { error } = await resend.emails.send({
+      from: `Alex (Asistente Intelindev) <${REMITENTE}>`,
+      to: process.env.OWNER_EMAIL,
       subject: `Nueva cita agendada: ${nombre} - ${fecha} ${hora}`,
       text: `Se agendó una nueva cita por teléfono.\n\nCliente: ${nombre}\nFecha: ${fecha}\nHora: ${hora}\n${contacto}`
     });
+    if (error) throw new Error(error.message);
     console.log("✉️ Correo de notificación enviado al dueño del calendario.");
   } catch (e) {
     console.error("❌ Error enviando correo de notificación al dueño:", e.message);
@@ -71,12 +73,13 @@ async function notificarNuevaCita({ nombre, fecha, hora, telefono, correo }) {
   // Confirmación al cliente, solo si dejó correo (si solo dejó teléfono no hay a dónde enviarle).
   if (correo) {
     try {
-      await mailer.sendMail({
-        from: `Intelindev <${process.env.GMAIL_USER}>`,
+      const { error } = await resend.emails.send({
+        from: `Intelindev <${REMITENTE}>`,
         to: correo,
         subject: `Confirmación de tu cita con Intelindev - ${fecha} ${hora}`,
         text: `Hola ${nombre},\n\nTu cita con Intelindev quedó confirmada.\n\nFecha: ${fecha}\nHora: ${hora}\n\nSi necesitas reagendar o cancelar, contáctanos respondiendo a este correo o al +1 407 555 0199.\n\nSaludos,\nEquipo Intelindev`
       });
+      if (error) throw new Error(error.message);
       console.log(`✉️ Correo de confirmación enviado al cliente (${correo}).`);
     } catch (e) {
       console.error("❌ Error enviando confirmación al cliente:", e.message);

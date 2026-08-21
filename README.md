@@ -12,7 +12,7 @@ Llamada (teléfono o navegador)
         │                                                │
         │                                                ├─► Claude (Anthropic) — conversación y decisión de herramientas
         │                                                ├─► Google Calendar API — disponibilidad y creación de eventos
-        │                                                └─► Nodemailer (Gmail) — correos de confirmación
+        │                                                └─► Resend — correos de confirmación
         ▼
    Voz del agente
 ```
@@ -29,7 +29,7 @@ Retell AI se encarga de la telefonía y de convertir voz a texto y texto a voz. 
 - Una cuenta de [Retell AI](https://www.retellai.com/) con un agente configurado en modo **Custom LLM**.
 - Una API key de [Anthropic](https://console.anthropic.com/).
 - Una cuenta de servicio de Google Cloud con acceso a Google Calendar API.
-- Una cuenta de Gmail con una [contraseña de aplicación](https://myaccount.google.com/apppasswords) para el envío de correos.
+- Una cuenta de [Resend](https://resend.com/) (gratis hasta 3,000 correos/mes) para el envío de correos de confirmación.
 
 ## Instalación
 
@@ -46,12 +46,17 @@ Completa `.env` con tus credenciales:
 | `ANTHROPIC_API_KEY` | API key de Anthropic (Claude) |
 | `PORT` | Puerto local del servidor (por defecto `8080`) |
 | `AGENT_ID` | ID del agente de Retell, usado por el endpoint `/create-web-call` |
-| `GMAIL_USER` | Cuenta de Gmail que envía y recibe las notificaciones |
-| `GMAIL_APP_PASSWORD` | Contraseña de aplicación de esa cuenta de Gmail |
+| `RESEND_API_KEY` | API key de tu cuenta de Resend, para enviar los correos de confirmación |
+| `RESEND_FROM_EMAIL` | Remitente verificado en Resend (ej. `alex@intelindev.com`). Si lo dejas vacío, se usa el remitente de pruebas `onboarding@resend.dev` |
+| `OWNER_EMAIL` | Correo del dueño del calendario, recibe la notificación de cada cita nueva |
 
 Además necesitas un archivo `credenciales.json` en la raíz del proyecto con las credenciales de la cuenta de servicio de Google (descargado desde Google Cloud Console). Ese archivo **no se sube al repositorio** (ver `.gitignore`).
 
 También edita `CALENDAR_ID` en [server.js](server.js) con el correo del calendario que quieres usar, y comparte ese calendario con el correo de la cuenta de servicio (permiso "Hacer cambios en los eventos").
+
+**Sobre Resend:** mientras no verifiques un dominio propio en [resend.com/domains](https://resend.com/domains), los correos solo se pueden enviar de forma confiable a la dirección con la que creaste la cuenta de Resend — el remitente de pruebas `onboarding@resend.dev` no garantiza entrega a terceros. Para mandarle confirmaciones a clientes reales, verificá un dominio (ej. `intelindev.com`, agregando los registros DNS que pide Resend) y configurá `RESEND_FROM_EMAIL` con una dirección de ese dominio.
+
+> Este proyecto usaba antes SMTP de Gmail vía Nodemailer. Se cambió a Resend porque varios hosts (Render incluido) bloquean o cortan las conexiones salientes por los puertos SMTP, lo que hacía que los correos de confirmación fallaran siempre con "Connection timeout" sin que se notara en el flujo normal.
 
 El horario laboral (`ZONA_NEGOCIO`, `HORA_APERTURA`, `HORA_CIERRE` en `server.js`) está configurado para Orlando, Florida (`America/New_York`, lunes a viernes de 9:00 a.m. a 6:00 p.m.). El asistente pregunta desde qué país o ciudad llama el cliente para explicarle la equivalencia horaria, y el servidor rechaza agendar citas fuera de ese horario aunque el modelo se equivoque.
 
