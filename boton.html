@@ -47,7 +47,9 @@
       .chat-header .dot.en-llamada { background: #ef4444; animation: pulso 1.5s infinite; }
       @keyframes pulso { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
       .chat-header .info { flex: 1; min-width: 0; }
+      .chat-header .title-row { display: flex; align-items: center; gap: 6px; }
       .chat-header h2 { margin: 0; color: #f8fafc; font-size: 15px; }
+      .chat-header .lang-flags { font-size: 12px; letter-spacing: -2px; opacity: 0.85; }
       .chat-header p { margin: 0; color: #94a3b8; font-size: 12px; }
       .chat-header .close-btn {
         background: none; border: none; color: #94a3b8; font-size: 18px; cursor: pointer;
@@ -100,7 +102,10 @@
       <div class="chat-header">
         <div class="dot" id="statusDot"></div>
         <div class="info">
-          <h2>Alex - Asistente Intelindev</h2>
+          <div class="title-row">
+            <h2>Alex - Asistente Intelindev</h2>
+            <span class="lang-flags" title="Disponible en español e inglés / Available in Spanish and English">🇪🇸🇺🇸</span>
+          </div>
           <p id="statusText">Habla o escribe, como prefieras</p>
         </div>
         <button class="close-btn" id="closeBtn" aria-label="Cerrar">✕</button>
@@ -256,8 +261,9 @@
     }
   });
 
-  // Mensaje inicial, igual al saludo que usa el agente de voz.
-  agregarMensaje('assistant', 'Hola, soy Alex, tu asistente de inteligencia artificial para Intelindev. ¿En qué puedo ayudarte hoy?');
+  // Mensaje inicial bilingüe: mismo saludo en español que usa el agente de voz, más su
+  // versión en inglés, así el visitante ve de entrada que puede seguir en cualquiera de los dos.
+  agregarMensaje('assistant', 'Hola, soy Alex, tu asistente de inteligencia artificial para Intelindev. ¿En qué puedo ayudarte hoy?\n\nHi, I\'m Alex, Intelindev\'s AI assistant. How can I help you today?');
 
   // --- VOZ (SDK cargado bajo demanda, así la página no paga ese peso si nadie usa el widget) ---
 
