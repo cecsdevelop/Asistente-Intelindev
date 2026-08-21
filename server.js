@@ -137,19 +137,20 @@ ZONA HORARIA DEL CLIENTE:
 - Si el cliente no quiere decir desde dónde llama, continúa asumiendo que la hora que menciona ya está en hora del Este.
 
 CIERRE DE LLAMADA:
-- Cuando el cliente confirme que no necesita nada más, despídete de forma breve y cálida usando su nombre, y en ese mismo mensaje llama a la herramienta 'finalizar_llamada'.
-- No vuelvas a ofrecer ayuda, ni repitas preguntas, ni uses 'revisar_disponibilidad' u otra herramienta después de que el cliente ya haya confirmado que no necesita nada más.`;
+- Cuando el cliente confirme que no necesita nada más, o pida directamente terminar, cortar o salir de la conversación (por ejemplo "terminar", "cuelga", "end the call", "hang up", "bye", en español o inglés), despídete de forma breve y cálida usando su nombre, y en ese mismo mensaje llama a la herramienta 'finalizar_llamada'. No lo cuestiones ni le preguntes si está seguro, es una instrucción directa.
+- No vuelvas a ofrecer ayuda, ni repitas preguntas, ni uses 'revisar_disponibilidad' u otra herramienta después de que el cliente ya haya confirmado que no necesita nada más o haya pedido terminar.`;
 }
 
 // Detección determinística de frases de cierre. No confiamos solo en que el modelo
 // elija bien la herramienta 'finalizar_llamada': si el último mensaje del cliente
-// suena claramente a "no necesito nada más", cortamos el flujo de herramientas
-// de calendario por completo en ese turno.
+// suena claramente a "no necesito nada más" o es un comando directo de cortar
+// (en español o inglés, ya que el asistente es bilingüe), cortamos el flujo de
+// herramientas de calendario por completo en ese turno.
 function pareceCierre(texto) {
   if (!texto || typeof texto !== 'string') return false;
   const t = texto.toLowerCase().trim();
   if (t.includes('?')) return false;
-  return /(nada m[aá]s|eso es todo|eso ser[ií]a todo|no necesito nada|ya no necesito|no,? gracias|as[ií] est[aá] bien|solo (eso|era eso)|nada,? gracias)/.test(t);
+  return /(nada m[aá]s|eso es todo|eso ser[ií]a todo|no necesito nada|ya no necesito|no,? gracias|as[ií] est[aá] bien|solo (eso|era eso)|nada,? gracias|\bterminar\b|\bfinalizar\b|\bcolgar\b|\bcuelga\b|\bsalir\b|adi[oó]s|hasta luego|\bend\b|end call|hang up|goodbye|\bbye\b|that'?s (it|all)|i'?m done|\bexit\b)/.test(t);
 }
 
 const tools = [
@@ -179,7 +180,7 @@ const tools = [
   },
   {
     name: "finalizar_llamada",
-    description: "Úsala SOLO cuando el cliente confirme explícitamente que no necesita nada más (ej. 'no, nada más', 'eso es todo, gracias'). Antes de llamarla, incluye en el mismo mensaje una despedida breve y amable usando el nombre del cliente.",
+    description: "Úsala cuando el cliente confirme explícitamente que no necesita nada más (ej. 'no, nada más', 'eso es todo, gracias') o cuando pida directamente terminar/cortar/salir de la conversación (ej. 'terminar', 'cuelga', 'end the call', 'hang up', 'bye'), en español o inglés. Antes de llamarla, incluye en el mismo mensaje una despedida breve y amable usando el nombre del cliente.",
     input_schema: { type: "object", properties: {}, required: [] }
   }
 ];
